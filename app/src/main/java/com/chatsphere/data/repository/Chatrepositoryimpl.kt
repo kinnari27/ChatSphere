@@ -1,249 +1,143 @@
 package com.chatsphere.data.repository
 
-import com.chatsphere.core.network.safeApiCall
+import com.chatsphere.core.common.AppResult
+import com.chatsphere.core.database.ChatDao
+import com.chatsphere.core.database.MessageEntity
+import com.chatsphere.core.database.PendingMessageEntity
 import com.chatsphere.core.signalr.SignalRManager
-import com.chatsphere.data.local.dao.ChatDao
-import com.chatsphere.data.local.dao.MessageDao
-import com.chatsphere.data.local.dao.UserDao
-import com.chatsphere.data.local.entity.MessageEntity
-import com.chatsphere.data.mapper.*
-import com.chatsphere.data.remote.api.ChatApi
-import com.chatsphere.data.remote.dto.SendMessageRequest
-import com.chatsphere.domain.model.*
+import com.chatsphere.data.mapper.toDomain
+import com.chatsphere.data.mapper.toEntity
+import com.chatsphere.data.remote.ChatSphereApi
+import com.chatsphere.data.remote.SendMessageRequest
+import com.chatsphere.domain.model.ConnectionState
+import com.chatsphere.domain.model.Message
+import com.chatsphere.domain.model.MessageStatus
+import com.chatsphere.domain.model.MessageType
+import com.chatsphere.domain.model.TypingState
 import com.chatsphere.domain.repository.ChatRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
-import timber.log.Timber
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Offline-first implementation of [ChatRepository].
+ * Cache-first chat repository.
  *
- * Architecture:
- * - Room is the single source of truth for the UI
- * - API calls populate/update Room, never directly observed by the UI
- * - Outgoing messages are inserted as [MessageStatus.Pending] immediately
- * - SignalR events update Room in real-time, driving reactive UI updates
+ * UI observes Room flows, outgoing messages are written locally before network delivery, and
+ * failed sends are replayed when SignalR reports a connected state.
  */
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
-    private val chatApi: ChatApi,
+    private val api: ChatSphereApi,
     private val chatDao: ChatDao,
-    private val messageDao: MessageDao,
-    private val userDao: UserDao,
     private val signalRManager: SignalRManager
 ) : ChatRepository {
-
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val typing = MutableStateFlow<TypingState?>(null)
 
     init {
-        // Observe incoming real-time messages and persist to Room
-        scope.launch {
-            signalRManager.incomingMessages.collect { messageDto ->
-                val entity = messageDto.toEntity()
-                messageDao.insertMessage(entity)
-                chatDao.updateLastMessage(messageDto.chatId, messageDto.id, messageDto.createdAt)
-            }
-        }
-
-        // Update message delivery statuses from SignalR
-        scope.launch {
-            signalRManager.messageStatusUpdates.collect { update ->
-                update.messageId?.let { id ->
-                    messageDao.updateMessageStatus(id, update.status)
-                }
-                update.chatId?.let { chatId ->
-                    messageDao.markChatAsDelivered(chatId)
-                }
-            }
-        }
+        signalRManager.incomingMessages
+            .onEach { chatDao.upsertMessage(it.toEntity()) }
+            .launchIn(scope)
+        signalRManager.typingEvents
+            .onEach { typing.value = it }
+            .launchIn(scope)
+        signalRManager.connectionState
+            .filter { it == ConnectionState.Connected }
+            .onEach { syncPendingMessages() }
+            .launchIn(scope)
     }
 
-    override fun observeChats(): Flow<List<Chat>> =
-        chatDao.observeChats()
-            .map { chatEntities ->
-                chatEntities.map { chatEntity ->
-                    val participantIds = chatDao.getParticipantIds(chatEntity.id)
-                    val participants = userDao.getUsersByIds(participantIds).map { it.toDomain() }
-                    val lastMessage = chatEntity.lastMessageId?.let { id ->
-                        messageDao.getMessageById(id)?.toDomain()
-                    }
-                    Chat(
-                        id = chatEntity.id,
-                        type = if (chatEntity.type == "group") ChatType.Group else ChatType.OneToOne,
-                        name = chatEntity.name,
-                        avatarUrl = chatEntity.avatarUrl,
-                        participants = participants,
-                        lastMessage = lastMessage,
-                        unreadCount = chatEntity.unreadCount,
-                        isPinned = chatEntity.isPinned,
-                        isArchived = chatEntity.isArchived,
-                        isMuted = chatEntity.isMuted,
-                        createdAt = Instant.ofEpochMilli(chatEntity.createdAt),
-                        updatedAt = Instant.ofEpochMilli(chatEntity.updatedAt)
-                    )
-                }
-            }
-            .onStart {
-                // Trigger background refresh on first collection
-                scope.launch { refreshChats() }
-            }
+    override fun observeConversations() = chatDao.observeConversations()
+        .map { entities -> entities.map { it.toDomain() } }
 
-    override fun observeChat(chatId: String): Flow<Chat?> =
-        chatDao.observeChat(chatId).map { chatEntity ->
-            chatEntity ?: return@map null
-            val participantIds = chatDao.getParticipantIds(chatEntity.id)
-            val participants = userDao.getUsersByIds(participantIds).map { it.toDomain() }
-            Chat(
-                id = chatEntity.id,
-                type = if (chatEntity.type == "group") ChatType.Group else ChatType.OneToOne,
-                name = chatEntity.name,
-                avatarUrl = chatEntity.avatarUrl,
-                participants = participants,
-                lastMessage = null,
-                unreadCount = chatEntity.unreadCount,
-                isPinned = chatEntity.isPinned,
-                isArchived = chatEntity.isArchived,
-                isMuted = chatEntity.isMuted,
-                createdAt = Instant.ofEpochMilli(chatEntity.createdAt),
-                updatedAt = Instant.ofEpochMilli(chatEntity.updatedAt)
-            )
-        }
+    override fun observeMessages(conversationId: String) = chatDao.observeMessages(conversationId)
+        .map { entities -> entities.map { it.toDomain() } }
 
-    override fun observeMessages(chatId: String, pageSize: Int): Flow<List<Message>> =
-        messageDao.observeMessages(chatId, limit = pageSize)
-            .map { entities -> entities.map { it.toDomain() } }
-            .onStart {
-                scope.launch { refreshMessages(chatId, pageSize) }
-            }
+    override fun observeTyping(conversationId: String) = typing
+        .map { it?.takeIf { state -> state.conversationId == conversationId && state.isTyping } }
+        .distinctUntilChanged()
 
-    override suspend fun sendMessage(chatId: String, content: MessageContent): Result<Message> {
-        // 1. Create local pending message immediately (optimistic update)
-        val localId = "local_${UUID.randomUUID()}"
-        val now = System.currentTimeMillis()
-        val (type, contentStr) = serializeContent(content)
+    override fun observeConnectionState(): Flow<ConnectionState> = signalRManager.connectionState
 
-        val pendingEntity = MessageEntity(
-            id = localId,
-            chatId = chatId,
-            senderId = "current_user",     // Replaced after sync
+    override suspend fun sendMessage(conversationId: String, body: String, replyToMessageId: String?): AppResult<Message> {
+        val local = Message(
+            id = UUID.randomUUID().toString(),
+            conversationId = conversationId,
+            senderId = "me",
             senderName = "You",
-            senderAvatarUrl = null,
-            type = type,
-            content = contentStr,
-            status = "pending",
-            replyToId = null,
-            replyPreviewJson = null,
-            reactionsJson = "[]",
-            createdAt = now,
-            updatedAt = null
+            body = body,
+            type = MessageType.Text,
+            status = MessageStatus.Pending,
+            createdAt = Instant.now(),
+            replyToMessageId = replyToMessageId
         )
-        messageDao.insertMessage(pendingEntity)
-        chatDao.updateLastMessage(chatId, localId, now)
-
-        // 2. Attempt server sync
-        return safeApiCall {
-            chatApi.sendMessage(SendMessageRequest(chatId, type, contentStr))
-        }.onSuccess { dto ->
-            // Replace temp message with real server response
-            messageDao.deleteMessage(localId)
-            messageDao.insertMessage(dto.toEntity())
-            chatDao.updateLastMessage(chatId, dto.id, dto.createdAt)
-        }.onFailure {
-            // Mark as failed for retry
-            messageDao.updateMessageStatus(localId, "failed")
-            Timber.e(it, "Failed to send message to $chatId")
-        }.map { dto -> dto.toDomain() }
+        chatDao.upsertMessage(local.toEntity())
+        return runCatching {
+            val remote = api.sendMessage(SendMessageRequest(conversationId, body, replyToMessageId)).toEntity()
+            chatDao.upsertMessage(remote)
+            signalRManager.sendMessage(conversationId, body, replyToMessageId)
+            remote.toDomain()
+        }.fold(
+            onSuccess = { AppResult.Success(it) },
+            onFailure = {
+                chatDao.enqueuePending(local.toPendingEntity())
+                AppResult.Success(local)
+            }
+        )
     }
 
-    override suspend fun deleteMessage(messageId: String): Result<Unit> =
-        safeApiCall { chatApi.deleteMessage(messageId) }
-            .onSuccess { messageDao.deleteMessage(messageId) }
+    override suspend fun markAsRead(conversationId: String, messageId: String) {
+        chatDao.updateMessageStatus(messageId, MessageStatus.Read)
+    }
 
-    override suspend fun editMessage(messageId: String, newText: String): Result<Message> =
-        safeApiCall { chatApi.editMessage(messageId, mapOf("content" to newText)) }
-            .onSuccess { dto -> messageDao.insertMessage(dto.toEntity()) }
-            .map { it.toDomain() }
+    override suspend fun setTyping(conversationId: String, isTyping: Boolean) {
+        if (isTyping) signalRManager.startTyping(conversationId) else signalRManager.stopTyping(conversationId)
+    }
 
-    override suspend fun markChatAsRead(chatId: String): Result<Unit> =
-        safeApiCall { chatApi.markChatAsRead(chatId) }
-            .onSuccess {
-                chatDao.clearUnreadCount(chatId)
-                signalRManager.markRead(chatId)
-            }
+    override suspend fun searchMessages(query: String): List<Message> =
+        chatDao.searchMessages(query).map { it.toDomain() }
 
-    override suspend fun pinMessage(messageId: String): Result<Unit> =
-        safeApiCall { chatApi.pinMessage(messageId) }
-            .onSuccess { messageDao.setPinned(messageId, true) }
-
-    override suspend fun archiveChat(chatId: String, archive: Boolean): Result<Unit> =
-        safeApiCall { chatApi.archiveChat(chatId, mapOf("archived" to archive)) }
-            .onSuccess { chatDao.setArchived(chatId, archive) }
-            .map { }
-
-    override suspend fun searchMessages(query: String): Result<List<Message>> =
-        safeApiCall { chatApi.searchMessages(query) }
-            .map { dtos -> dtos.map { it.toDomain() } }
-
-    override suspend fun reactToMessage(messageId: String, emoji: String): Result<Unit> =
-        safeApiCall { chatApi.reactToMessage(messageId, mapOf("emoji" to emoji)) }
-
-    override suspend fun syncPendingMessages(): Result<Unit> {
-        val pending = messageDao.getPendingMessages() + messageDao.getFailedMessages()
-        pending.forEach { entity ->
-            safeApiCall {
-                chatApi.sendMessage(SendMessageRequest(entity.chatId, entity.type, entity.content))
-            }.onSuccess { dto ->
-                messageDao.deleteMessage(entity.id)
-                messageDao.insertMessage(dto.toEntity())
-            }.onFailure {
-                messageDao.updateMessageStatus(entity.id, "failed")
+    override suspend fun syncPendingMessages() {
+        chatDao.pendingMessages().forEach { pending ->
+            runCatching {
+                api.sendMessage(SendMessageRequest(pending.conversationId, pending.body, pending.replyToMessageId))
+            }.onSuccess { remote ->
+                chatDao.upsertMessage(remote.toEntity())
+                chatDao.removePending(pending.localId)
             }
         }
-        return Result.success(Unit)
     }
-
-    // ── Private helpers ──────────────────────────────────────────────────
-
-    private suspend fun refreshChats() {
-        safeApiCall { chatApi.getChats() }
-            .onSuccess { dtos ->
-                dtos.forEach { dto ->
-                    chatDao.insertChat(dto.toEntity())
-                    userDao.insertUsers(dto.participants.map { it.toEntity() })
-                    chatDao.insertParticipants(
-                        dto.participants.map {
-                            com.chatsphere.data.local.entity.ChatParticipantEntity(dto.id, it.id)
-                        }
-                    )
-                    dto.lastMessage?.let { msg ->
-                        messageDao.insertMessage(msg.toEntity())
-                    }
-                }
-            }
-            .onFailure { Timber.e(it, "Failed to refresh chats") }
-    }
-
-    private suspend fun refreshMessages(chatId: String, pageSize: Int) {
-        safeApiCall { chatApi.getMessages(chatId, page = 0, pageSize = pageSize) }
-            .onSuccess { response ->
-                messageDao.insertMessages(response.data.map { it.toEntity() })
-            }
-            .onFailure { Timber.e(it, "Failed to refresh messages for $chatId") }
-    }
-
-    private fun serializeContent(content: MessageContent): Pair<String, String> =
-        when (content) {
-            is MessageContent.Text -> Pair("text", content.text)
-            is MessageContent.Emoji -> Pair("emoji", content.unicode)
-            is MessageContent.Image -> Pair("image", "${content.url}|${content.thumbnailUrl}|${content.width}|${content.height}")
-            is MessageContent.VoiceNote -> Pair("voice", "${content.url}|${content.durationSeconds}")
-            is MessageContent.Media -> Pair("media", content.url)
-        }
 }
+
+private fun Message.toEntity() = MessageEntity(
+    id = id,
+    conversationId = conversationId,
+    senderId = senderId,
+    senderName = senderName,
+    body = body,
+    type = type,
+    status = status,
+    createdAtEpochMillis = createdAt.toEpochMilli(),
+    replyToMessageId = replyToMessageId,
+    reactionSummary = reactions.entries.joinToString(",") { "${it.key}:${it.value}" },
+    isPinned = isPinned
+)
+
+private fun Message.toPendingEntity() = PendingMessageEntity(
+    localId = id,
+    conversationId = conversationId,
+    body = body,
+    replyToMessageId = replyToMessageId,
+    createdAtEpochMillis = createdAt.toEpochMilli()
+)

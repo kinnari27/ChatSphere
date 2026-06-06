@@ -2,37 +2,28 @@ package com.chatsphere.core.database
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
-import com.chatsphere.data.local.dao.*
-import com.chatsphere.data.local.entity.*
+import androidx.room.TypeConverter
+import androidx.room.TypeConverters
+import com.chatsphere.domain.model.ConversationType
+import com.chatsphere.domain.model.MessageStatus
+import com.chatsphere.domain.model.MessageType
 
-/**
- * ChatSphere Room database.
- *
- * Version history:
- *  - v1: Initial schema with users, chats, messages, groups
- */
 @Database(
-    entities = [
-        UserEntity::class,
-        ChatEntity::class,
-        ChatParticipantEntity::class,
-        MessageEntity::class,
-        GroupEntity::class,
-        GroupMemberEntity::class,
-        AuthSessionEntity::class
-    ],
+    entities = [UserEntity::class, ConversationEntity::class, MessageEntity::class, PendingMessageEntity::class],
     version = 1,
     exportSchema = true
 )
+@TypeConverters(ChatSphereConverters::class)
 abstract class ChatSphereDatabase : RoomDatabase() {
-
-    abstract fun authSessionDao(): AuthSessionDao
-    abstract fun userDao(): UserDao
     abstract fun chatDao(): ChatDao
-    abstract fun messageDao(): MessageDao
-    abstract fun groupDao(): GroupDao
+    abstract fun userDao(): UserDao
+}
 
-    companion object {
-        const val DATABASE_NAME = "chatsphere.db"
-    }
+class ChatSphereConverters {
+    @TypeConverter fun toMessageStatus(value: String): MessageStatus = MessageStatus.valueOf(value)
+    @TypeConverter fun fromMessageStatus(value: MessageStatus): String = value.name
+    @TypeConverter fun toMessageType(value: String): MessageType = MessageType.valueOf(value)
+    @TypeConverter fun fromMessageType(value: MessageType): String = value.name
+    @TypeConverter fun toConversationType(value: String): ConversationType = ConversationType.valueOf(value)
+    @TypeConverter fun fromConversationType(value: ConversationType): String = value.name
 }
