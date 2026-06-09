@@ -25,11 +25,11 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun login(email: String, password: String): AppResult<AuthSession> = runCatching {
         api.login(LoginRequest(email, password)).toDomain()
-    }.fold(::persistSession) { AppResult.Error(it) }
+    }.fold({ persistSession(it) }, { AppResult.Error(it) })
 
     override suspend fun register(name: String, email: String, password: String): AppResult<AuthSession> = runCatching {
         api.register(RegisterRequest(name, email, password)).toDomain()
-    }.fold(::persistSession) { AppResult.Error(it) }
+    }.fold({ persistSession(it) }, { AppResult.Error(it) })
 
     override suspend fun logout() {
         sessionLocalDataSource.clear()
