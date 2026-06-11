@@ -1,9 +1,9 @@
 package com.chatsphere.presentation.chats
 
+import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -18,6 +18,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -26,14 +27,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.chatsphere.domain.model.Conversation
+import com.chatsphere.domain.model.ConversationType
+import com.chatsphere.domain.model.Message
+import com.chatsphere.domain.model.MessageType
 import com.chatsphere.domain.model.User
 import com.chatsphere.presentation.components.ChatBubble
 import com.chatsphere.presentation.components.ChatToolbar
 import com.chatsphere.presentation.components.EmptyState
 import com.chatsphere.presentation.components.TypingIndicator
 import com.chatsphere.presentation.components.UserAvatar
+import com.chatsphere.presentation.theme.ChatSphereTheme
 
 @Composable
 fun ChatListScreen(
@@ -41,10 +48,19 @@ fun ChatListScreen(
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsState()
+    ChatListContent(state = state, onChatSelected = onChatSelected)
+}
+
+@Composable
+fun ChatListContent(
+    state: ChatListUiState,
+    onChatSelected: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
     if (state.conversations.isEmpty()) {
-        EmptyState("No conversations yet", "Messages and groups will appear here.", Modifier.fillMaxSize())
+        EmptyState("No conversations yet", "Messages and groups will appear here.", modifier.fillMaxSize())
     } else {
-        LazyColumn(Modifier.fillMaxSize()) {
+        LazyColumn(modifier.fillMaxSize()) {
             items(state.conversations, key = { it.id }) { conversation ->
                 ListItem(
                     headlineContent = { Text(conversation.title, fontWeight = FontWeight.SemiBold) },
@@ -66,6 +82,16 @@ fun ChatListScreen(
 @Composable
 fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsState()
+    ChatContent(state = state, onEvent = viewModel::onEvent)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatContent(
+    state: ChatUiState,
+    onEvent: (ChatEvent) -> Unit,
+    modifier: Modifier = Modifier
+) {
     Scaffold(
         topBar = { ChatToolbar(title = "Conversation", subtitle = state.typingUser?.let { "$it typing" }) },
         bottomBar = {
@@ -75,15 +101,16 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
             ) {
                 OutlinedTextField(
                     value = state.input,
-                    onValueChange = { viewModel.onEvent(ChatEvent.InputChanged(it)) },
+                    onValueChange = { onEvent(ChatEvent.InputChanged(it)) },
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("Message") }
                 )
-                IconButton(onClick = { viewModel.onEvent(ChatEvent.SendClicked) }) {
+                IconButton(onClick = { onEvent(ChatEvent.SendClicked) }) {
                     Icon(Icons.Outlined.Send, contentDescription = "Send")
                 }
             }
-        }
+        },
+        modifier = modifier
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             LazyColumn(
@@ -99,6 +126,45 @@ fun ChatScreen(viewModel: ChatViewModel = hiltViewModel()) {
                 }
             }
             TypingIndicator(state.typingUser)
+        }
+    }
+}
+
+@Preview(name = "Light Mode")
+@Preview(name = "Dark Mode", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun ChatListPreview() {
+    ChatSphereTheme {
+        Surface {
+            ChatListContent(
+                state = ChatListUiState(
+                    conversations = listOf(
+                        Conversation("1", "John Doe", ConversationType.Direct, lastMessage = Message("1", "1", "2", "John", "Hey there!", MessageType.Text)),
+                        Conversation("2", "Android Group", ConversationType.Group, unreadCount = 5)
+                    )
+                ),
+                onChatSelected = {}
+            )
+        }
+    }
+}
+
+@Preview(name = "Light Mode")
+@Preview(name = "Dark Mode", uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+fun ChatScreenPreview() {
+    ChatSphereTheme {
+        Surface {
+            ChatContent(
+                state = ChatUiState(
+                    messages = listOf(
+                        Message("1", "1", "2", "John", "Hello!", MessageType.Text),
+                        Message("2", "1", "me", "You", "Hi John, how are you?", MessageType.Text)
+                    ),
+                    typingUser = "John"
+                ),
+                onEvent = {}
+            )
         }
     }
 }

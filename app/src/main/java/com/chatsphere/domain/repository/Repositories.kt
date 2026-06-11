@@ -5,6 +5,7 @@ import com.chatsphere.domain.model.AuthSession
 import com.chatsphere.domain.model.ConnectionState
 import com.chatsphere.domain.model.Conversation
 import com.chatsphere.domain.model.Message
+import com.chatsphere.domain.model.MessageType
 import com.chatsphere.domain.model.TypingState
 import com.chatsphere.domain.model.User
 import kotlinx.coroutines.flow.Flow
@@ -14,6 +15,7 @@ interface AuthRepository {
     val session: Flow<AuthSession?>
     suspend fun login(email: String, password: String): AppResult<AuthSession>
     suspend fun register(name: String, email: String, password: String): AppResult<AuthSession>
+    suspend fun loginWithGoogle(idToken: String): AppResult<AuthSession>
     suspend fun logout()
 }
 
@@ -24,6 +26,7 @@ interface ChatRepository {
     fun observeTyping(conversationId: String): Flow<TypingState?>
     fun observeConnectionState(): Flow<ConnectionState>
     suspend fun sendMessage(conversationId: String, body: String, replyToMessageId: String? = null): AppResult<Message>
+    suspend fun sendMediaMessage(conversationId: String, fileUri: String, type: MessageType, replyToMessageId: String? = null): AppResult<Message>
     suspend fun markAsRead(conversationId: String, messageId: String)
     suspend fun setTyping(conversationId: String, isTyping: Boolean)
     suspend fun searchMessages(query: String): List<Message>

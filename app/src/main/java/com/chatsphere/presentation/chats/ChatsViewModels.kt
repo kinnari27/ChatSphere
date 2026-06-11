@@ -8,8 +8,10 @@ import com.chatsphere.core.common.UiState
 import com.chatsphere.domain.model.Conversation
 import com.chatsphere.domain.model.Message
 import com.chatsphere.domain.model.TypingState
+import com.chatsphere.domain.model.MessageType
 import com.chatsphere.domain.usecase.ObserveConversationsUseCase
 import com.chatsphere.domain.usecase.ObserveMessagesUseCase
+import com.chatsphere.domain.usecase.SendMediaMessageUseCase
 import com.chatsphere.domain.usecase.SendMessageUseCase
 import com.chatsphere.domain.usecase.SetTypingUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -51,6 +53,7 @@ data class ChatUiState(
 sealed interface ChatEvent : UiEvent {
     data class InputChanged(val value: String) : ChatEvent
     data object SendClicked : ChatEvent
+    data class MediaSelected(val uri: String, val type: MessageType) : ChatEvent
 }
 
 @HiltViewModel
@@ -58,6 +61,7 @@ class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     observeMessagesUseCase: ObserveMessagesUseCase,
     private val sendMessageUseCase: SendMessageUseCase,
+    private val sendMediaMessageUseCase: SendMediaMessageUseCase,
     private val setTypingUseCase: SetTypingUseCase,
     private val chatRepository: com.chatsphere.domain.repository.ChatRepository
 ) : ViewModel() {
@@ -86,6 +90,7 @@ class ChatViewModel @Inject constructor(
                 debounceTyping()
             }
             ChatEvent.SendClicked -> send()
+            is ChatEvent.MediaSelected -> sendMedia(event.uri, event.type)
         }
     }
 
@@ -95,6 +100,10 @@ class ChatViewModel @Inject constructor(
         _state.update { it.copy(input = "") }
         setTypingUseCase(conversationId, false)
         sendMessageUseCase(conversationId, body)
+    }
+
+    private fun sendMedia(uri: String, type: MessageType) = viewModelScope.launch {
+        sendMediaMessageUseCase(conversationId, uri, type)
     }
 
     private fun debounceTyping() {

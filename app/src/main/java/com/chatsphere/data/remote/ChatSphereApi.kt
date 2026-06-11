@@ -12,6 +12,9 @@ interface ChatSphereApi {
     @POST("auth/register")
     suspend fun register(@Body request: RegisterRequest): AuthResponse
 
+    @POST("auth/google")
+    suspend fun loginWithGoogle(@Body request: GoogleLoginRequest): AuthResponse
+
     @GET("conversations")
     suspend fun conversations(): List<ConversationDto>
 

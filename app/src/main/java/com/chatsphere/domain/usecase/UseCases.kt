@@ -9,6 +9,10 @@ class LoginUseCase @Inject constructor(private val repository: AuthRepository) {
     suspend operator fun invoke(email: String, password: String) = repository.login(email.trim(), password)
 }
 
+class LoginWithGoogleUseCase @Inject constructor(private val repository: AuthRepository) {
+    suspend operator fun invoke(idToken: String) = repository.loginWithGoogle(idToken)
+}
+
 class RegisterUseCase @Inject constructor(private val repository: AuthRepository) {
     suspend operator fun invoke(name: String, email: String, password: String) =
         repository.register(name.trim(), email.trim(), password)
@@ -25,6 +29,11 @@ class ObserveMessagesUseCase @Inject constructor(private val repository: ChatRep
 class SendMessageUseCase @Inject constructor(private val repository: ChatRepository) {
     suspend operator fun invoke(conversationId: String, body: String, replyToMessageId: String? = null) =
         repository.sendMessage(conversationId, body.trim(), replyToMessageId)
+}
+
+class SendMediaMessageUseCase @Inject constructor(private val repository: ChatRepository) {
+    suspend operator fun invoke(conversationId: String, fileUri: String, type: com.chatsphere.domain.model.MessageType, replyToMessageId: String? = null) =
+        repository.sendMediaMessage(conversationId, fileUri, type, replyToMessageId)
 }
 
 class SetTypingUseCase @Inject constructor(private val repository: ChatRepository) {

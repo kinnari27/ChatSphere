@@ -3,7 +3,7 @@ package com.chatsphere.domain.model
 import java.time.Instant
 
 enum class MessageStatus { Pending, Sent, Delivered, Read, Failed }
-enum class MessageType { Text, Image, Emoji, Voice }
+enum class MessageType { Text, Image, Emoji, Voice, Video, Document, Audio }
 enum class ConversationType { Direct, Group }
 enum class ConnectionState { Disconnected, Connecting, Connected, Reconnecting }
 
