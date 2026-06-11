@@ -8,12 +8,12 @@ plugins {
 
 android {
     namespace = "com.chatsphere"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.chatsphere"
         minSdk = 26
-        targetSdk = 36
+        targetSdk = 37
         versionCode = 1
         versionName = "1.0.0"
 
