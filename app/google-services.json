@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "725705012306",
+    "firebase_url": "https://chatsphere-f569a-default-rtdb.firebaseio.com",
     "project_id": "chatsphere-f569a",
     "storage_bucket": "chatsphere-f569a.firebasestorage.app"
   },
@@ -12,7 +13,20 @@
           "package_name": "com.chatsphere"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "725705012306-uftllis8l59h7ceo9430qnoid8a8sd29.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.chatsphere",
+            "certificate_hash": "d2a77a8d06885098a0a4d78d85fcb10951e79dd9"
+          }
+        },
+        {
+          "client_id": "725705012306-0fmlus1itmgn31ctsv3llbtribuv3vv1.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDtTFYa90hdJST266HG3e02cyd4YVXO1aY"
@@ -20,7 +34,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "725705012306-0fmlus1itmgn31ctsv3llbtribuv3vv1.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
