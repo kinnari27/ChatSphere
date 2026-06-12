@@ -1,5 +1,7 @@
 package com.chatsphere.data.repository
 
+import android.content.Context
+import android.net.Uri
 import com.chatsphere.core.common.AppResult
 import com.chatsphere.core.database.ChatDao
 import com.chatsphere.core.database.MessageEntity
@@ -15,6 +17,7 @@ import com.chatsphere.domain.model.MessageStatus
 import com.chatsphere.domain.model.MessageType
 import com.chatsphere.domain.model.TypingState
 import com.chatsphere.domain.repository.ChatRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +28,9 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
@@ -40,7 +46,8 @@ import javax.inject.Singleton
 class ChatRepositoryImpl @Inject constructor(
     private val api: ChatSphereApi,
     private val chatDao: ChatDao,
-    private val signalRManager: SignalRManager
+    private val signalRManager: SignalRManager,
+    @param:ApplicationContext private val context: Context
 ) : ChatRepository {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val typing = MutableStateFlow<TypingState?>(null)
@@ -87,6 +94,56 @@ class ChatRepositoryImpl @Inject constructor(
             val remote = api.sendMessage(SendMessageRequest(conversationId, body, replyToMessageId)).toEntity()
             chatDao.upsertMessage(remote)
             signalRManager.sendMessage(conversationId, body, replyToMessageId)
+            remote.toDomain()
+        }.fold(
+            onSuccess = { AppResult.Success(it) },
+            onFailure = {
+                chatDao.enqueuePending(local.toPendingEntity())
+                AppResult.Success(local)
+            }
+        )
+    }
+
+    override suspend fun sendMediaMessage(
+        conversationId: String,
+        fileUri: String,
+        type: MessageType,
+        replyToMessageId: String?
+    ): AppResult<Message> {
+        val local = Message(
+            id = UUID.randomUUID().toString(),
+            conversationId = conversationId,
+            senderId = "me",
+            senderName = "You",
+            body = fileUri,
+            type = type,
+            status = MessageStatus.Pending,
+            createdAt = Instant.now(),
+            replyToMessageId = replyToMessageId
+        )
+        chatDao.upsertMessage(local.toEntity())
+
+        return runCatching {
+            val uri = Uri.parse(fileUri)
+            val inputStream = context.contentResolver.openInputStream(uri) ?: throw Exception("Failed to open URI")
+            val bytes = inputStream.readBytes()
+            inputStream.close()
+
+            val filePart = MultipartBody.Part.createFormData(
+                "file",
+                "media_${System.currentTimeMillis()}",
+                bytes.toRequestBody("application/octet-stream".toMediaTypeOrNull())
+            )
+
+            val remote = api.sendMediaMessage(
+                conversationId = conversationId.toRequestBody("text/plain".toMediaTypeOrNull()),
+                file = filePart,
+                type = type.name.toRequestBody("text/plain".toMediaTypeOrNull()),
+                replyToMessageId = replyToMessageId?.toRequestBody("text/plain".toMediaTypeOrNull())
+            ).toEntity()
+
+            chatDao.upsertMessage(remote)
+            signalRManager.sendMessage(conversationId, remote.body, replyToMessageId)
             remote.toDomain()
         }.fold(
             onSuccess = { AppResult.Success(it) },

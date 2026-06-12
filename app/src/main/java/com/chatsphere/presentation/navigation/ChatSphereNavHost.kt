@@ -1,9 +1,9 @@
 package com.chatsphere.presentation.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Chat
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Add
-import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -88,9 +88,9 @@ fun ChatSphereNavHost() {
 }
 
 private sealed class Screen(val route: String, val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
-    data object Login : Screen("login", "Login", Icons.Outlined.Chat)
+    data object Login : Screen("login", "Login", Icons.AutoMirrored.Outlined.Chat)
     data object Register : Screen("register", "Register", Icons.Outlined.Add)
-    data object Chats : Screen("chats", "Chats", Icons.Outlined.Chat)
+    data object Chats : Screen("chats", "Chats", Icons.AutoMirrored.Outlined.Chat)
     data object Groups : Screen("groups", "Groups", Icons.Outlined.Add)
     data object Profile : Screen("profile", "Profile", Icons.Outlined.AccountCircle)
     data object Settings : Screen("settings", "Settings", Icons.Outlined.Settings)

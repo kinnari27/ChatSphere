@@ -54,7 +54,7 @@ object NetworkModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): ChatSphereDatabase =
         Room.databaseBuilder(context, ChatSphereDatabase::class.java, "chatsphere.db")
-            .fallbackToDestructiveMigration()
+            .fallbackToDestructiveMigration(dropAllTables = true)
             .build()
 
     @Provides fun provideChatDao(database: ChatSphereDatabase) = database.chatDao()

@@ -29,6 +29,7 @@ sealed interface AuthEvent : UiEvent {
     data class EmailChanged(val value: String) : AuthEvent
     data class PasswordChanged(val value: String) : AuthEvent
     data class LoginWithGoogle(val idToken: String) : AuthEvent
+    data class ErrorOccurred(val message: String) : AuthEvent
     data object Login : AuthEvent
     data object Register : AuthEvent
 }
@@ -48,6 +49,7 @@ class AuthViewModel @Inject constructor(
             is AuthEvent.EmailChanged -> _state.update { it.copy(email = event.value) }
             is AuthEvent.PasswordChanged -> _state.update { it.copy(password = event.value) }
             is AuthEvent.LoginWithGoogle -> submitGoogleLogin(event.idToken)
+            is AuthEvent.ErrorOccurred -> _state.update { it.copy(error = event.message, isLoading = false) }
             AuthEvent.Login -> submitLogin()
             AuthEvent.Register -> submitRegister()
         }

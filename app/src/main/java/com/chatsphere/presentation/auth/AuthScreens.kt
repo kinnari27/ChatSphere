@@ -26,7 +26,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
-import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import com.chatsphere.R
 import com.chatsphere.presentation.theme.ChatSphereTheme
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
@@ -49,9 +51,15 @@ fun LoginScreen(onAuthenticated: () -> Unit, onRegister: () -> Unit, viewModel: 
         onEvent = viewModel::onEvent,
         onRegister = onRegister,
         onGoogleSignIn = {
+            val clientId = context.getString(R.string.default_web_client_id)
+            if (clientId.contains("YOUR_WEB_CLIENT_ID")) {
+                viewModel.onEvent(AuthEvent.ErrorOccurred("Please configure your Google Client ID in strings.xml"))
+                return@LoginContent
+            }
+
             val googleIdOption = GetGoogleIdOption.Builder()
                 .setFilterByAuthorizedAccounts(false)
-                .setServerClientId(context.getString(R.string.default_web_client_id))
+                .setServerClientId(clientId)
                 .build()
 
             val request = GetCredentialRequest.Builder()
@@ -65,7 +73,12 @@ fun LoginScreen(onAuthenticated: () -> Unit, onRegister: () -> Unit, viewModel: 
                     if (credential is GoogleIdTokenCredential) {
                         viewModel.onEvent(AuthEvent.LoginWithGoogle(credential.idToken))
                     }
+                } catch (e: NoCredentialException) {
+                    viewModel.onEvent(AuthEvent.ErrorOccurred("No Google accounts found on this device"))
+                } catch (e: GetCredentialException) {
+                    viewModel.onEvent(AuthEvent.ErrorOccurred("Google sign in failed: ${e.message}"))
                 } catch (e: Exception) {
+                    viewModel.onEvent(AuthEvent.ErrorOccurred("An unexpected error occurred"))
                     e.printStackTrace()
                 }
             }
